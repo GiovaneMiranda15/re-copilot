@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Dependências
+        run: uv sync --extra anthropic --extra mcp
+      - name: Testes
+        run: uv run pytest -q
+      - name: Pacote
+        run: |
+          uv build
+          unzip -l dist/*.whl | grep -q "rag_re_engine/skill/SKILL.md"
+          unzip -l dist/*.whl | grep -q " recop.py"
+      - name: Instalador
+        run: |
+          bash -n install.sh
+          ./install.sh --agents "$RUNNER_TEMP/AGENTS.md"
+          ./install.sh --agents "$RUNNER_TEMP/AGENTS.md"
+          test "$(grep -c 're-copilot:inicio' "$RUNNER_TEMP/AGENTS.md")" = 1
