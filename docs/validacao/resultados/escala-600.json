@@ -1,0 +1,30 @@
+{
+  "documentos": 600,
+  "chunks": 1621,
+  "embedder": "fastembed:sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "indexacao_s": 69.9,
+  "chunks_por_s": 23.2,
+  "indice_mb": 8.7,
+  "consultas": 150,
+  "k": 5,
+  "estrategias": {
+    "baseline (densa)": {
+      "recall_at_k": 0.153,
+      "mrr": 0.107,
+      "latencia_media_s": 0.09,
+      "latencia_p95_s": 0.128
+    },
+    "baseline (hibrida)": {
+      "recall_at_k": 0.867,
+      "mrr": 0.479,
+      "latencia_media_s": 0.099,
+      "latencia_p95_s": 0.141
+    },
+    "corrective_rag (hibrida)": {
+      "recall_at_k": 0.867,
+      "mrr": 0.479,
+      "latencia_media_s": 0.095,
+      "latencia_p95_s": 0.128
+    }
+  }
+}

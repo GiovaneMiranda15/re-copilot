@@ -1,11 +1,14 @@
-"""Índice em SQLite com busca vetorial exata (força bruta em numpy).
+"""Índice em SQLite com busca híbrida: vetorial exata (força bruta em numpy) + léxica (FTS5/BM25), fundidas por RRF.
 
 Para corpora de projeto (dezenas a poucos milhares de documentos) a busca exata é rápida e elimina
-aproximação de ANN como variável na avaliação.
+aproximação de ANN como variável na avaliação. A parte léxica recupera o que o embedding confunde:
+números, códigos e identificadores ("filial 137", "RN-004", "ck_limite"). `RAG_RE_BUSCA=densa` desliga a híbrida.
 """
 
 from __future__ import annotations
 
+import os
+import re
 import sqlite3
 from pathlib import Path
 
@@ -56,6 +59,21 @@ class SqliteStore:
             self._conn.execute("ALTER TABLE chunks ADD COLUMN nivel INTEGER NOT NULL DEFAULT 0")
         self._matrix: np.ndarray | None = None
         self._chunks: list[Chunk] = []
+        self._pos: dict[str, int] = {}
+        self._fts = self._preparar_fts()
+
+    def _preparar_fts(self) -> bool:
+        """Cria o índice léxico; em índice antigo, preenche a partir dos chunks. Sem FTS5 no SQLite, segue só vetorial."""
+        try:
+            self._conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5("
+                               "chunk_id UNINDEXED, text, tokenize='unicode61 remove_diacritics 2')")
+        except sqlite3.OperationalError:
+            return False
+        vazio = self._conn.execute("SELECT 1 FROM chunks_fts LIMIT 1").fetchone() is None
+        if vazio and self._conn.execute("SELECT 1 FROM chunks LIMIT 1").fetchone():
+            with self._conn:
+                self._conn.execute("INSERT INTO chunks_fts (chunk_id, text) SELECT chunk_id, text FROM chunks")
+        return True
 
     @property
     def embedder_name(self) -> str | None:
@@ -75,6 +93,10 @@ class SqliteStore:
                     for c, v in zip(chunks, vectors, strict=True)
                 ],
             )
+            if self._fts:
+                self._conn.executemany("DELETE FROM chunks_fts WHERE chunk_id = ?", [(c.chunk_id,) for c in chunks])
+                self._conn.executemany("INSERT INTO chunks_fts (chunk_id, text) VALUES (?, ?)",
+                                       [(c.chunk_id, c.text) for c in chunks])
         self._matrix = None
 
     def delete_docs(self, doc_ids: list[str]) -> None:
@@ -90,6 +112,8 @@ class SqliteStore:
                 self._conn.executemany("DELETE FROM mentions WHERE chunk_id = ?", ids)
                 self._conn.executemany("DELETE FROM relations WHERE chunk_id = ?", ids)
                 self._conn.executemany("DELETE FROM graph_done WHERE chunk_id = ?", ids)
+                if self._fts:
+                    self._conn.executemany("DELETE FROM chunks_fts WHERE chunk_id = ?", ids)
                 if ids:
                     self.set_meta("derivados_desatualizados", "1")
                 self._conn.execute("DELETE FROM chunks WHERE doc_id = ?", (doc,))
@@ -126,6 +150,8 @@ class SqliteStore:
         with self._conn:
             self._conn.execute("DELETE FROM chunks WHERE nivel > 0")
             self._conn.execute("DELETE FROM raptor_children")
+            if self._fts:
+                self._conn.execute("DELETE FROM chunks_fts WHERE chunk_id NOT IN (SELECT chunk_id FROM chunks)")
         self._matrix = None
 
     def has_summaries(self) -> bool:
@@ -163,27 +189,67 @@ class SqliteStore:
         if self.sistemas is not None:
             rows = [r for r in rows if r[5] in self.sistemas]
         self._chunks = [Chunk(r[0], r[1], r[2], r[3], r[5], r[6], r[7]) for r in rows]
+        self._pos = {c.chunk_id: i for i, c in enumerate(self._chunks)}
         self._matrix = np.vstack([np.frombuffer(r[4], dtype=np.float32) for r in rows]) if rows else np.zeros((0, 1))
 
     def search(
-        self, query_vector: np.ndarray, k: int, exclude: set[str] | None = None, all_levels: bool = False
+        self, query_vector: np.ndarray, k: int, exclude: set[str] | None = None, all_levels: bool = False,
+        query_text: str | None = None,
     ) -> list[ScoredChunk]:
-        """Busca exata. Por padrão só em trechos originais; `all_levels` inclui resumos (collapsed tree)."""
+        """Busca exata. Por padrão só em trechos originais; `all_levels` inclui resumos (collapsed tree).
+
+        Com `query_text`, funde o ranking vetorial com o léxico (BM25) por RRF. A `similarity` devolvida continua
+        sendo a do embedding, para os limiares dos pipelines não mudarem de escala.
+        """
         if self._matrix is None:
             self._load()
         if not self._chunks or k <= 0:
             return []
         scores = self._matrix @ query_vector.astype(np.float32)
-        order = np.argsort(-scores, kind="stable")
-        results: list[ScoredChunk] = []
-        for idx in order:
+
+        def valido(chunk: Chunk) -> bool:
+            return not (exclude and chunk.chunk_id in exclude) and (all_levels or chunk.nivel == 0)
+
+        hibrida = bool(query_text) and self._fts and os.environ.get("RAG_RE_BUSCA", "hibrida") != "densa"
+        profundidade = max(k * 4, 20) if hibrida else k
+        densos: list[ScoredChunk] = []
+        for idx in np.argsort(-scores, kind="stable"):
             chunk = self._chunks[idx]
-            if (exclude and chunk.chunk_id in exclude) or (chunk.nivel > 0 and not all_levels):
-                continue
-            results.append(ScoredChunk(chunk, float(scores[idx])))
-            if len(results) == k:
-                break
-        return results
+            if valido(chunk):
+                densos.append(ScoredChunk(chunk, float(scores[idx])))
+                if len(densos) == profundidade:
+                    break
+        if not hibrida:
+            return densos
+        lexicos = [ScoredChunk(self._chunks[i], float(scores[i])) for i in self._lexico(query_text, profundidade, valido)]
+        if not lexicos:
+            return densos[:k]
+        fusao: dict[str, float] = {}
+        melhor: dict[str, ScoredChunk] = {}
+        for ranking in (densos, lexicos):
+            for pos, hit in enumerate(ranking, start=1):
+                fusao[hit.chunk.chunk_id] = fusao.get(hit.chunk.chunk_id, 0.0) + 1.0 / (60 + pos)
+                melhor[hit.chunk.chunk_id] = hit
+        return [melhor[c] for c in sorted(fusao, key=lambda c: (-fusao[c], c))[:k]]
+
+    def _lexico(self, texto: str, n: int, valido) -> list[int]:
+        termos = list(dict.fromkeys(t for t in re.findall(r"\w+", texto.lower()) if len(t) > 1))
+        if not termos:
+            return []
+        consulta = " OR ".join(f'"{t}"' for t in termos)
+        try:
+            rows = self._conn.execute("SELECT chunk_id FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY bm25(chunks_fts) "
+                                      "LIMIT ?", (consulta, n * 3)).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        out = []
+        for (cid,) in rows:
+            i = self._pos.get(cid)  # fora de `_pos`: filtrado por sistema
+            if i is not None and valido(self._chunks[i]):
+                out.append(i)
+                if len(out) == n:
+                    break
+        return out
 
     def close(self) -> None:
         self._conn.close()

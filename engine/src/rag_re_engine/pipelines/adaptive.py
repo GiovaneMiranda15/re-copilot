@@ -71,7 +71,7 @@ class AdaptiveRagPipeline:
         out = PipelineOutput(evidence=[])
         route = self._route(query, out)
         if route == "simples":
-            hits = self.store.search(self.embedder.embed_query(query), self.k)
+            hits = self.store.search(self.embedder.embed_query(query), self.k, query_text=query)
             out.evidence = [to_evidence(h) for h in hits]
             out.trace.append(f"retrieve: top-{self.k} ({len(hits)} chunks)")
             return out
@@ -83,7 +83,7 @@ class AdaptiveRagPipeline:
 
         subs = decompose(self.llm, query, out)
         out.trace.append(f"decompose: {subs}")
-        merged = rrf([self.store.search(self.embedder.embed_query(s), self.k) for s in subs], self.k * 2)
+        merged = rrf([self.store.search(self.embedder.embed_query(s), self.k, query_text=s) for s in subs], self.k * 2)
         out.evidence = [to_evidence(h) for h in merged]
         if not merged:
             return out

@@ -11,7 +11,6 @@ Expõe:
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
@@ -20,24 +19,11 @@ from mcp.server.mcpserver.exceptions import ToolError
 from rag_re_engine import operacoes
 
 
-def _pasta_skill() -> Path:
-    """No repositório, a raiz; instalado como pacote, a cópia em `rag_re_engine/skill`."""
-    empacotada = Path(__file__).resolve().parent / "skill"
-    if (empacotada / "SKILL.md").exists():
-        return empacotada
-    return Path(__file__).resolve().parents[3]
-
-
 def _recop():
-    try:
-        import recop
-    except ImportError:
-        sys.path.insert(0, str(_pasta_skill() / "scripts"))
-        import recop
-    return recop
+    return operacoes.recop()
 
 
-SKILL = _pasta_skill()
+SKILL = operacoes.pasta_skill()
 INSTRUCOES = (
     "Copiloto de Engenharia de Requisitos. Antes de agir, leia o prompt `re-copilot` (ou o recurso re-copilot://skill) "
     "e siga o método. As ferramentas `re_*` operam sobre `<projeto>/.re`; as `rag_*`, sobre o índice do motor."
@@ -154,9 +140,46 @@ def re_candidatos(projeto: str, texto: str, n: int = 8) -> list[dict]:
     return _recop().candidatos(_carregar(projeto)[1], texto, n)
 
 
-@mcp.tool(description="Pares de requisitos a revisar por possível contradição.")
-def re_pares(projeto: str) -> list[dict]:
-    return _recop().pares_revisar(_carregar(projeto)[1])
+@mcp.tool(description="Pares de requisitos a revisar por possível contradição. `amplo`: todos os pares do mesmo tema, "
+                      "sem exigir sinal léxico, com os enunciados, para você julgar a contradição de sentido.")
+def re_pares(projeto: str, amplo: bool = False, n: int = 60) -> list[dict]:
+    model = _carregar(projeto)[1]
+    return _recop().pares_amplos(model, n) if amplo else _recop().pares_revisar(model)
+
+
+@mcp.tool(description="Gatilho de manutenção: fontes novas, alteradas e removidas e os itens do modelo que citam cada uma. "
+                      "Não grava nada. Rode ao retomar um projeto.")
+def re_vigiar(projeto: str) -> dict:
+    re_dir = _carregar(projeto)[0]
+    rel = _recop().vigiar(re_dir)
+    rel["mensagem"] = _recop().mensagem_vigiar(rel)
+    return rel
+
+
+@mcp.tool(description="Transcreve docx, pptx, xlsx ou csv para .re/extraidos (texto, ou só estrutura e agregados de planilha).")
+def re_extrair(projeto: str, arquivo: str, sistema: str = "geral") -> str:
+    re_dir = _carregar(projeto)[0]
+    caminho = Path(arquivo).expanduser()
+    caminho = caminho if caminho.is_absolute() else Path(projeto).expanduser() / caminho
+    return str(_executar(lambda: _recop().extrair(caminho, re_dir, sistema)))
+
+
+@mcp.tool(description="Estrutura (DDL, sem dados) de um banco ao vivo, só leitura: sqlite:///arq.db, postgresql://usuario@host/db "
+                      "ou mysql://usuario@host/db. Senha só por PGPASSWORD/MYSQL_PWD no ambiente do servidor.")
+def re_esquema(projeto: str, dsn: str, sistema: str = "geral") -> str:
+    re_dir = _carregar(projeto)[0]
+    texto = _executar(lambda: _recop().esquema_banco(dsn))
+    saida = re_dir / "extraidos" / f"{sistema}-esquema.sql"
+    saida.parent.mkdir(parents=True, exist_ok=True)
+    saida.write_text(texto)
+    return f"gerado {saida}"
+
+
+@mcp.tool(description="Publica o backlog no Jira ou no Azure DevOps pela API. Sem `aplicar`, só devolve o plano. "
+                      "Credenciais por variáveis de ambiente do servidor (JIRA_* ou AZURE_DEVOPS_*). Idempotente.")
+def re_publicar(projeto: str, destino: str, aplicar: bool = False, processo: str = "agile", delta: bool = False) -> dict:
+    re_dir, model = _carregar(projeto)
+    return _executar(lambda: _recop().publicar(re_dir, model, destino, aplicar, processo, delta))
 
 
 @mcp.tool(description="Notas e arquivos citados nas fontes e ainda não registrados.")
@@ -219,6 +242,15 @@ def rag_buscar(projeto: str, atividade: str, consulta: str, k: int = 5, sistemas
 @mcp.tool(description="Constrói as estruturas que usam LLM: árvore RAPTOR e grafo do GraphRAG (`o_que`: raptor, graph).")
 def rag_construir(projeto: str, o_que: list[str] | None = None, llm: str = "auto") -> dict:
     return operacoes.construir(_db(projeto), set(o_que or ["raptor", "graph"]), llm)
+
+
+@mcp.tool(description="LLM julga os pares de requisitos do mesmo tema e aponta contradições de sentido (sugestões a conferir).")
+def rag_contradicoes(projeto: str, llm: str = "auto", n: int = 60) -> dict:
+    _carregar(projeto)
+    try:
+        return operacoes.contradicoes(_re(projeto), llm, n)
+    except RuntimeError as exc:
+        raise ToolError(str(exc)) from exc
 
 
 def main() -> None:

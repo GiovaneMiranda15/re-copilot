@@ -71,3 +71,21 @@ Feature: use `Epic` → `Issue`.
 - O ID do requisito sempre vai em label ou tag: é o que mantém a rastreabilidade depois da
   importação. Após um CR, gere só os itens `revisar` com `--delta` (arquivo `*-delta.csv`). Reimportar
   cria itens novos: o delta serve de lista do que atualizar no Jira ou Azure.
+
+## Publicar pela API (sem CSV)
+
+```bash
+python3 -I <skill>/scripts/recop.py publicar jira            # só o plano: o que seria criado ou atualizado
+python3 -I <skill>/scripts/recop.py publicar jira --aplicar  # envia
+python3 -I <skill>/scripts/recop.py publicar azure --processo agile --aplicar --delta
+```
+
+- **Sempre mostre o plano e peça confirmação antes de `--aplicar`:** cria itens num sistema externo.
+- Credenciais só por variável de ambiente, que o usuário define: Jira `JIRA_URL`, `JIRA_EMAIL`, `JIRA_TOKEN`,
+  `JIRA_PROJETO` (tipos em português: `JIRA_TIPO_EPICO=Épico`, `JIRA_TIPO_HISTORIA=História`); Azure DevOps
+  `AZURE_DEVOPS_ORG` (`https://dev.azure.com/<org>`), `AZURE_DEVOPS_PROJETO`, `AZURE_DEVOPS_PAT`. Nunca peça o token no
+  chat nem o grave em arquivo.
+- Idempotente: `.re/publicado.json` guarda ID do modelo → chave remota. Repetir atualiza título, descrição e labels em
+  vez de duplicar; `--delta` envia só itens novos ou em `revisar`.
+- Jira usa a API v2 (descrição em texto) e liga a história ao épico por `parent`; sem nível Feature, a feature vira o
+  label `feature-<ID>`, como no CSV.

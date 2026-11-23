@@ -18,6 +18,11 @@ Uso (a partir da raiz do projeto analisado):
     python3 <skill>/scripts/recop.py baseline --nota "v1 validada"
     python3 <skill>/scripts/recop.py diff [B-001]       # o que mudou desde a baseline
     python3 <skill>/scripts/recop.py exportar jira|azure [--processo agile|scrum|basic] [--delta] [--saida arq.csv]
+    python3 <skill>/scripts/recop.py pares --amplo [-n 60]   # todos os pares do mesmo tema, para julgar contradição de sentido
+    python3 <skill>/scripts/recop.py vigiar [--hook] [--intervalo 60]  # fontes que mudaram e itens que as citam
+    python3 <skill>/scripts/recop.py extrair <arq.docx|pptx|xlsx|csv> [--sistema SIS-01]  # transcreve para .re/extraidos
+    python3 <skill>/scripts/recop.py esquema <dsn> [--sistema SIS-01]  # DDL de banco ao vivo (sqlite, postgresql, mysql)
+    python3 <skill>/scripts/recop.py publicar jira|azure [--aplicar] [--delta]  # backlog via API (sem --aplicar: só o plano)
 Opção global: --re <dir> (default: .re)
 """
 
@@ -1048,6 +1053,451 @@ def export_azure(model: dict, processo: str = "agile", delta: bool = False) -> s
     return out.getvalue()
 
 
+# ---------------------------------------------------------------- pares amplos
+
+NEGACAO = {"nao", "nunca", "jamais", "nenhum", "nenhuma", "sem", "proibido", "vedado", "impede"}
+
+
+def pares_amplos(model: dict, n: int = 60) -> list[dict]:
+    """Todos os pares do mesmo tema, ordenados pelo peso dos termos raros em comum.
+
+    `pares` só levanta pares com sinal léxico (polaridade, números, exclusividade) e perde contradições
+    de sentido. Esta lista não exige sinal: é para o agente (ou `rag-re-engine contradicoes`) ler e julgar.
+    Pares já ligados por qualquer relação ficam de fora.
+    """
+    ativos = [r for r in model["requisitos"] if r.get("status") not in {"descartado", "obsoleto"}]
+    sinais_lexicos = {(p["a"], p["b"]): p["motivo"] for p in pares_revisar(model, limite=10_000, por_regra_max=10_000)}
+    ligados = set()
+    for r in ativos:
+        for alvos in (r.get("rel") or {}).values():
+            for alvo in alvos:
+                ligados |= {(r["id"], alvo), (alvo, r["id"])}
+    bags, palavras = {}, {}
+    for r in ativos:
+        plain = _plain(f"{r.get('titulo', '')} {r.get('enunciado', '')}")
+        palavras[r["id"]] = set(regex.findall(r"[a-z0-9]+", plain))
+        bags[r["id"]] = {w[:5] for w in _tokens(plain) - NEGLIGENCIAVEIS if len(w) >= 4}
+    freq: dict[str, int] = {}
+    for radicais in bags.values():
+        for w in radicais:
+            freq[w] = freq.get(w, 0) + 1
+    pares = []
+    for i, a in enumerate(ativos):
+        for b in ativos[i + 1:]:
+            if (a["id"], b["id"]) in ligados:
+                continue
+            comuns = bags[a["id"]] & bags[b["id"]]
+            if not comuns:
+                continue
+            sinais = []
+            motivo = sinais_lexicos.get((a["id"], b["id"])) or sinais_lexicos.get((b["id"], a["id"]))
+            if motivo:
+                sinais.append(motivo)
+            if bool(palavras[a["id"]] & NEGACAO) != bool(palavras[b["id"]] & NEGACAO):
+                sinais.append("negação de um lado só")
+            peso = sum(1 / freq[w] for w in comuns) * (1.5 if sinais else 1)
+            pares.append({"a": a["id"], "b": b["id"], "pontos": round(peso, 3), "termos": sorted(comuns), "sinais": sinais,
+                          "enunciado_a": a.get("enunciado", ""), "enunciado_b": b.get("enunciado", "")})
+    return sorted(pares, key=lambda p: (-p["pontos"], p["a"], p["b"]))[:n]
+
+
+# ---------------------------------------------------------------- vigiar
+
+def _citam(model: dict, fonte: dict) -> list[str]:
+    """IDs do modelo que citam a fonte, por `fontes_id` ou pelo arquivo na citação."""
+    caminho = str(fonte.get("path", ""))
+    nome = Path(caminho).name
+    out = []
+    for name in COLLECTIONS:
+        for item in model[name]:
+            if fonte.get("id") in (item.get("fontes_id") or []):
+                out.append(item["id"])
+                continue
+            for cit in item.get("fontes") or []:
+                arq = _citation_file(cit)
+                if arq and (caminho.endswith(arq) or Path(arq).name == nome):
+                    out.append(item["id"])
+                    break
+    return out
+
+
+def vigiar(re_dir: Path) -> dict:
+    """Gatilho automático de manutenção: o que mudou nas fontes e quais itens citam o que mudou. Não grava nada."""
+    mudou = scan_fontes(re_dir, update=False)
+    model = load(re_dir)
+    por_path = {f["path"]: f for f in model["fontes"].get("fontes", [])}
+    afetados = {}
+    for p in mudou["alteradas"] + mudou["removidas"]:
+        ids = _citam(model, por_path.get(p, {"path": p}))
+        if ids:
+            afetados[p] = ids
+    total = len(mudou["novas"]) + len(mudou["alteradas"]) + len(mudou["removidas"])
+    return {"mudancas": total, "novas": mudou["novas"], "alteradas": mudou["alteradas"], "removidas": mudou["removidas"],
+            "itens_afetados": afetados}
+
+
+def mensagem_vigiar(rel: dict) -> str:
+    """Texto curto para o agente, usado pelo hook de início de sessão."""
+    if not rel["mudancas"]:
+        return ""
+    linhas = [f"[re-copilot] {rel['mudancas']} fonte(s) mudaram desde o último registro em .re/fontes.json."]
+    for rotulo in ("novas", "alteradas", "removidas"):
+        if rel[rotulo]:
+            amostra = ", ".join(rel[rotulo][:8]) + (" …" if len(rel[rotulo]) > 8 else "")
+            linhas.append(f"- {rotulo}: {amostra}")
+    for p, ids in rel["itens_afetados"].items():
+        linhas.append(f"- {p} é citada por: {', '.join(ids[:12])}")
+    linhas.append("Siga a manutenção da skill re-copilot (gatilho `fonte`): leia o que mudou, classifique cada informação, "
+                  "rode `impacto` nos itens afetados e só depois `recop.py fontes --update`.")
+    return "\n".join(linhas)
+
+
+# ---------------------------------------------------------------- extrair (docx, xlsx, pptx, csv)
+
+W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+S = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+R_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+
+
+def _xml(zf, name: str):
+    import xml.etree.ElementTree as ET
+    return ET.fromstring(zf.read(name))
+
+
+def texto_docx(path: Path) -> str:
+    """Parágrafos (títulos viram `#`) e tabelas em Markdown, na ordem do documento."""
+    import zipfile
+    with zipfile.ZipFile(path) as zf:
+        body = _xml(zf, "word/document.xml").find(f"{W}body")
+    out = []
+
+    def texto(el) -> str:
+        return "".join(t.text or "" for t in el.iter(f"{W}t")).strip()
+
+    for el in list(body) if body is not None else []:
+        if el.tag == f"{W}p":
+            t = texto(el)
+            if not t:
+                continue
+            estilo = el.find(f"{W}pPr/{W}pStyle")
+            nome = (estilo.get(f"{W}val") if estilo is not None else "") or ""
+            nivel = regex.search(r"(?:heading|titulo|título|ttulo)\s*(\d)", nome, regex.I)
+            out.append(f"{'#' * min(int(nivel.group(1)) + 1, 6)} {t}" if nivel else ("# " + t if nome.lower() == "title" else t))
+        elif el.tag == f"{W}tbl":
+            linhas = [[texto(c).replace("|", "\\|") for c in tr.iter(f"{W}tc")] for tr in el.iter(f"{W}tr")]
+            if linhas:
+                out.append("| " + " | ".join(linhas[0]) + " |\n|" + "---|" * len(linhas[0]))
+                out += ["| " + " | ".join(lin) + " |" for lin in linhas[1:]]
+    return "\n\n".join(out)
+
+
+def texto_pptx(path: Path) -> str:
+    import zipfile
+    with zipfile.ZipFile(path) as zf:
+        slides = sorted((n for n in zf.namelist() if regex.match(r"ppt/slides/slide\d+\.xml$", n)),
+                        key=lambda n: int(regex.search(r"(\d+)", n.rsplit("/", 1)[1]).group(1)))
+        out = []
+        for i, nome in enumerate(slides, 1):
+            paragrafos = ["".join(t.text or "" for t in p.iter(f"{A}t")).strip() for p in _xml(zf, nome).iter(f"{A}p")]
+            out.append(f"## Slide {i}\n\n" + "\n".join(p for p in paragrafos if p))
+    return "\n\n".join(out)
+
+
+def _col(ref: str) -> int:
+    n = 0
+    for ch in regex.match(r"[A-Z]+", ref).group(0):
+        n = n * 26 + ord(ch) - 64
+    return n - 1
+
+
+def linhas_xlsx(path: Path) -> dict[str, list[list[str]]]:
+    """Planilhas como listas de linhas (valores em texto). Uso interno: só agregados saem daqui."""
+    import zipfile
+    with zipfile.ZipFile(path) as zf:
+        nomes = zf.namelist()
+        compartilhadas = []
+        if "xl/sharedStrings.xml" in nomes:
+            compartilhadas = ["".join(t.text or "" for t in si.iter(f"{S}t")) for si in _xml(zf, "xl/sharedStrings.xml").iter(f"{S}si")]
+        rels = {r.get("Id"): r.get("Target") for r in _xml(zf, "xl/_rels/workbook.xml.rels")}
+        planilhas = {}
+        for sh in _xml(zf, "xl/workbook.xml").iter(f"{S}sheet"):
+            alvo = rels.get(sh.get(f"{R_NS}id"), "")
+            alvo = alvo.lstrip("/") if alvo.startswith("/") else "xl/" + alvo
+            if alvo not in nomes:
+                continue
+            linhas = []
+            for row in _xml(zf, alvo).iter(f"{S}row"):
+                valores: dict[int, str] = {}
+                for c in row.iter(f"{S}c"):
+                    v = c.find(f"{S}v")
+                    if c.get("t") == "s" and v is not None:
+                        val = compartilhadas[int(v.text)]
+                    elif c.get("t") == "inlineStr":
+                        val = "".join(t.text or "" for t in c.iter(f"{S}t"))
+                    else:
+                        val = v.text if v is not None else ""
+                    valores[_col(c.get("r", "A1"))] = val or ""
+                if valores:
+                    linhas.append([valores.get(i, "") for i in range(max(valores) + 1)])
+            planilhas[sh.get("name")] = linhas
+    return planilhas
+
+
+def _tipo_valor(v: str) -> str:
+    v = v.strip()
+    if not v:
+        return "vazio"
+    if regex.fullmatch(r"-?\d+(?:[.,]\d+)?", v):
+        return "número"
+    if regex.fullmatch(r"\d{1,4}[-/]\d{1,2}[-/]\d{1,4}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?", v):
+        return "data"
+    return "texto"
+
+
+def agregados_tabela(nome: str, linhas: list[list[str]]) -> str:
+    """Cabeçalho, contagem e perfil de cada coluna. Nunca devolve registros; categorias só em colunas de baixa cardinalidade."""
+    if not linhas:
+        return f"## {nome}\n\n(vazia)"
+    cab, dados = linhas[0], linhas[1:]
+    out = [f"## {nome}", "", f"{len(dados)} linha(s) de dados, {len(cab)} coluna(s).", "",
+           "| coluna | tipo | preenchida | distintos | observação |", "|---|---|---|---|---|"]
+    for i, col in enumerate(cab):
+        valores = [lin[i].strip() if i < len(lin) else "" for lin in dados]
+        cheios = [v for v in valores if v]
+        tipos = {}
+        for v in cheios:
+            t = _tipo_valor(v)
+            tipos[t] = tipos.get(t, 0) + 1
+        tipo = max(tipos, key=tipos.get) if tipos else "vazio"
+        distintos = len(set(cheios))
+        obs = ""
+        if tipo == "número" and cheios:
+            nums = [float(v.replace(",", ".")) for v in cheios if _tipo_valor(v) == "número"]
+            obs = f"mín {min(nums):g}, máx {max(nums):g}"
+        elif tipo == "texto" and 0 < distintos <= 8 and len(cheios) >= 10 and distintos / len(cheios) <= 0.3:
+            obs = "categorias: " + ", ".join(sorted(set(cheios)))
+        pct = f"{100 * len(cheios) // max(len(valores), 1)}%"
+        out.append("| " + " | ".join(_cell(x) for x in (col or f"(coluna {i + 1})", tipo, pct, distintos, mascarar(obs))) + " |")
+    return "\n".join(out)
+
+
+def extrair(path: Path, re_dir: Path, sistema: str = "geral") -> Path:
+    """Transcreve docx, pptx, xlsx e csv para `.re/extraidos/<sistema>-<nome>.md` (indexável), sem copiar registros."""
+    if SENSITIVE_FILES.search(str(path)):
+        raise SystemExit(f"recusado: {path.name} é arquivo de credenciais")
+    suffix = path.suffix.lower()
+    if suffix == ".docx":
+        corpo = mascarar(texto_docx(path))
+    elif suffix == ".pptx":
+        corpo = mascarar(texto_pptx(path))
+    elif suffix in {".xlsx", ".xlsm"}:
+        corpo = "\n\n".join(agregados_tabela(nome, linhas) for nome, linhas in linhas_xlsx(path).items())
+    elif suffix == ".csv":
+        texto = path.read_text(errors="replace")
+        dialeto = csv.Sniffer().sniff(texto[:4096], delimiters=",;\t|") if texto.strip() else csv.excel
+        corpo = agregados_tabela(path.name, list(csv.reader(io.StringIO(texto), dialeto)))
+    else:
+        raise SystemExit(f"formato não suportado por `extrair`: {suffix} (use docx, pptx, xlsx ou csv)")
+    destino = re_dir / "extraidos" / f"{sistema}-{path.stem}.md"
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        origem = path.resolve().relative_to(re_dir.resolve().parent)
+    except ValueError:
+        origem = path.name
+    destino.write_text(f"Transcrição de `{origem}` (gerada por recop.py extrair; só estrutura e agregados).\n\n{corpo}\n")
+    return destino
+
+
+# ---------------------------------------------------------------- esquema de banco ao vivo (só leitura)
+
+def _sem_senha(dsn: str) -> str:
+    return regex.sub(r"(//[^:/@]+):[^@]*@", r"\1:***@", dsn)
+
+
+def esquema_banco(dsn: str, runner=None) -> str:
+    """Estrutura (DDL) de um banco ao vivo, sem dados, em conexão de leitura.
+
+    sqlite:///caminho.db (biblioteca padrão, modo somente leitura), postgresql://… (pg_dump --schema-only)
+    e mysql://… (mysqldump --no-data). Senha por variável de ambiente (PGPASSWORD, MYSQL_PWD), nunca no DSN.
+    """
+    import shutil
+    import subprocess
+    from urllib.parse import unquote, urlparse
+    exige = runner is None
+    runner = runner or (lambda cmd, env: subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=300))
+    url = urlparse(dsn)
+    if url.password:
+        raise SystemExit("não coloque a senha no DSN: use PGPASSWORD ou MYSQL_PWD")
+    if url.scheme == "sqlite":
+        import sqlite3
+        resto = dsn.split(":", 1)[1]
+        # Convenção do SQLAlchemy: sqlite:///relativo.db e sqlite:////absoluto.db.
+        caminho = unquote(resto[3:] if resto.startswith("///") else resto[2:] if resto.startswith("//") else resto)
+        con = sqlite3.connect(f"file:{caminho}?mode=ro", uri=True)
+        try:
+            rows = con.execute("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' "
+                               "ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, name").fetchall()
+        finally:
+            con.close()
+        ddl = ";\n\n".join(r[0] for r in rows) + (";\n" if rows else "")
+    elif url.scheme in {"postgres", "postgresql"}:
+        if exige and not shutil.which("pg_dump"):
+            raise SystemExit("pg_dump não encontrado: instale o cliente do PostgreSQL")
+        proc = runner(["pg_dump", "--schema-only", "--no-owner", "--no-privileges", "--dbname", dsn], dict(os.environ))
+        if proc.returncode:
+            raise SystemExit(f"pg_dump falhou: {proc.stderr.strip()[:400]}")
+        ddl = "\n".join(l for l in proc.stdout.splitlines() if not l.startswith(("SET ", "SELECT pg_catalog.set_config")))
+    elif url.scheme in {"mysql", "mariadb"}:
+        if exige and not shutil.which("mysqldump"):
+            raise SystemExit("mysqldump não encontrado: instale o cliente do MySQL/MariaDB")
+        cmd = ["mysqldump", "--no-data", "--skip-comments", "--single-transaction", "--routines", "--triggers",
+               "-h", url.hostname or "localhost", "-P", str(url.port or 3306)]
+        if url.username:
+            cmd += ["-u", unquote(url.username)]
+        proc = runner(cmd + [url.path.lstrip("/")], dict(os.environ))
+        if proc.returncode:
+            raise SystemExit(f"mysqldump falhou: {proc.stderr.strip()[:400]}")
+        ddl = proc.stdout
+    else:
+        raise SystemExit(f"esquema não suportado: {url.scheme} (sqlite, postgresql, mysql)")
+    return f"-- estrutura de {_sem_senha(dsn)} (recop.py esquema; sem dados)\n" + mascarar(ddl)
+
+
+# ---------------------------------------------------------------- publicar (Jira / Azure DevOps via API)
+
+def _plano_publicacao(model: dict, destino: str, processo: str, publicado: dict, delta: bool) -> list[dict]:
+    epics, items = _ordered(model)
+    por_id = {i["id"]: i for i in items}
+    feito = publicado.get(destino, {})
+    plano = []
+
+    def tipo(item: dict) -> str:
+        if item["id"].startswith("EP-"):
+            return "Epic"
+        if item["id"].startswith("FT-"):
+            return "Feature"
+        return "Story" if destino == "jira" else AZURE_STORY[processo]
+
+    def pai(item: dict) -> str | None:
+        p = item.get("pai")
+        if destino == "jira" or processo == "basic":
+            # Sem nível Feature: a história pendura no épico da feature.
+            while p and p.startswith("FT-"):
+                p = por_id[p].get("pai")
+        return p
+
+    def visitar(item: dict) -> None:
+        sem_feature = item["id"].startswith("FT-") and (destino == "jira" or processo == "basic")
+        if not sem_feature and (not delta or item["id"] not in feito or item.get("status") == "revisar"):
+            extra = [f"feature-{item['pai']}"] if (str(item.get("pai", "")).startswith("FT-") and
+                                                    (destino == "jira" or processo == "basic")) else []
+            plano.append({"id": item["id"], "acao": "atualizar" if item["id"] in feito else "criar", "tipo": tipo(item),
+                          "titulo": item.get("titulo", ""), "pai": pai(item), "chave": feito.get(item["id"]),
+                          "labels": _labels(item) + extra})
+        for filho in _children(items, item["id"]):
+            visitar(filho)
+
+    for epic in epics:
+        visitar(epic)
+    return plano
+
+
+def _http(opener, metodo: str, url: str, corpo, cabecalhos: dict) -> dict:
+    from urllib.error import HTTPError
+    from urllib.request import Request
+    dados = json.dumps(corpo).encode() if corpo is not None else None
+    req = Request(url, data=dados, method=metodo, headers=cabecalhos)
+    try:
+        with opener(req) as resp:
+            texto = resp.read().decode() or "{}"
+    except HTTPError as exc:
+        detalhe = exc.read().decode(errors="replace")[:400]
+        raise SystemExit(f"{metodo} {url} → HTTP {exc.code}: {detalhe}") from None
+    return json.loads(texto)
+
+
+def _env(*nomes: str) -> dict:
+    faltam = [n for n in nomes if not os.environ.get(n)]
+    if faltam:
+        raise SystemExit("defina as variáveis de ambiente: " + ", ".join(faltam))
+    return {n: os.environ[n] for n in nomes}
+
+
+def publicar(re_dir: Path, model: dict, destino: str, aplicar: bool = False, processo: str = "agile",
+             delta: bool = False, opener=None) -> dict:
+    """Cria ou atualiza o backlog no Jira ou no Azure DevOps. Sem `aplicar`, só mostra o plano (nada sai da máquina).
+
+    Idempotente: `.re/publicado.json` guarda ID do modelo → chave remota; repetir atualiza em vez de duplicar.
+    Jira: JIRA_URL, JIRA_EMAIL, JIRA_TOKEN, JIRA_PROJETO (tipos: JIRA_TIPO_EPICO, JIRA_TIPO_HISTORIA).
+    Azure DevOps: AZURE_DEVOPS_ORG (https://dev.azure.com/<org>), AZURE_DEVOPS_PROJETO, AZURE_DEVOPS_PAT.
+    """
+    import base64
+    from urllib.parse import quote
+    from urllib.request import urlopen
+    if destino not in {"jira", "azure"}:
+        raise SystemExit("destino: jira ou azure")
+    if destino == "azure" and processo not in AZURE_STORY:
+        raise SystemExit(f"processo inválido: {processo} (agile, scrum, basic)")
+    arquivo = re_dir / "publicado.json"
+    publicado = json.loads(arquivo.read_text()) if arquivo.exists() else {}
+    plano = _plano_publicacao(model, destino, processo, publicado, delta)
+    if not aplicar:
+        return {"destino": destino, "aplicado": False, "plano": plano}
+    opener = opener or (lambda req: urlopen(req, timeout=60))
+    por_id = {i["id"]: i for i in model["backlog"]}
+    mapa = publicado.setdefault(destino, {})
+    feitos = []
+    if destino == "jira":
+        env = _env("JIRA_URL", "JIRA_EMAIL", "JIRA_TOKEN", "JIRA_PROJETO")
+        base = env["JIRA_URL"].rstrip("/")
+        auth = base64.b64encode(f"{env['JIRA_EMAIL']}:{env['JIRA_TOKEN']}".encode()).decode()
+        cab = {"Authorization": f"Basic {auth}", "Content-Type": "application/json", "Accept": "application/json"}
+        tipos = {"Epic": os.environ.get("JIRA_TIPO_EPICO", "Epic"), "Story": os.environ.get("JIRA_TIPO_HISTORIA", "Story")}
+        for passo in plano:
+            item = por_id[passo["id"]]
+            campos = {"summary": passo["titulo"], "description": _body(item, passo["tipo"] != "Epic"),
+                      "labels": [str(lb).replace(" ", "-") for lb in passo["labels"]]}
+            if passo["acao"] == "atualizar":
+                _http(opener, "PUT", f"{base}/rest/api/2/issue/{quote(passo['chave'])}", {"fields": campos}, cab)
+            else:
+                campos |= {"project": {"key": env["JIRA_PROJETO"]}, "issuetype": {"name": tipos[passo["tipo"]]}}
+                if passo["pai"] and passo["pai"] in mapa:
+                    campos["parent"] = {"key": mapa[passo["pai"]]}
+                mapa[passo["id"]] = _http(opener, "POST", f"{base}/rest/api/2/issue", {"fields": campos}, cab)["key"]
+            feitos.append({**passo, "chave": mapa[passo["id"]]})
+            arquivo.write_text(json.dumps(publicado, ensure_ascii=False, indent=2) + "\n")
+    else:
+        env = _env("AZURE_DEVOPS_ORG", "AZURE_DEVOPS_PROJETO", "AZURE_DEVOPS_PAT")
+        base = f"{env['AZURE_DEVOPS_ORG'].rstrip('/')}/{quote(env['AZURE_DEVOPS_PROJETO'])}/_apis/wit/workitems"
+        auth = base64.b64encode(f":{env['AZURE_DEVOPS_PAT']}".encode()).decode()
+        cab = {"Authorization": f"Basic {auth}", "Content-Type": "application/json-patch+json"}
+        from html import escape
+        for passo in plano:
+            item = por_id[passo["id"]]
+            ops = [{"op": "add", "path": "/fields/System.Title", "value": passo["titulo"]},
+                   {"op": "add", "path": "/fields/System.Description",
+                    "value": escape(_body(item, False)).replace("\n", "<br>")},
+                   {"op": "add", "path": "/fields/System.Tags", "value": "; ".join(map(str, passo["labels"]))}]
+            if item.get("criterios_aceite"):
+                ops.append({"op": "add", "path": "/fields/Microsoft.VSTS.Common.AcceptanceCriteria",
+                            "value": "<br>".join(escape(c) for c in item["criterios_aceite"])})
+            if AZURE_PRIORITY.get(item.get("prioridade")):
+                ops.append({"op": "add", "path": "/fields/Microsoft.VSTS.Common.Priority",
+                            "value": int(AZURE_PRIORITY[item["prioridade"]])})
+            if passo["acao"] == "atualizar":
+                _http(opener, "PATCH", f"{base}/{passo['chave']}?api-version=7.1", ops, cab)
+            else:
+                if passo["pai"] and passo["pai"] in mapa:
+                    ops.append({"op": "add", "path": "/relations/-",
+                                "value": {"rel": "System.LinkTypes.Hierarchy-Reverse", "url": f"{base}/{mapa[passo['pai']]}"}})
+                criado = _http(opener, "POST", f"{base}/${quote(passo['tipo'])}?api-version=7.1", ops, cab)
+                mapa[passo["id"]] = str(criado["id"])
+            feitos.append({**passo, "chave": mapa[passo["id"]]})
+            arquivo.write_text(json.dumps(publicado, ensure_ascii=False, indent=2) + "\n")
+    return {"destino": destino, "aplicado": True, "feitos": feitos}
+
+
 # ---------------------------------------------------------------- CLI
 
 def main(argv: list[str] | None = None) -> int:
@@ -1059,7 +1509,24 @@ def main(argv: list[str] | None = None) -> int:
     ini = sub.add_parser("init")
     ini.add_argument("projeto")
     sub.add_parser("lint")
-    sub.add_parser("pares")
+    pa = sub.add_parser("pares")
+    pa.add_argument("--amplo", action="store_true", help="todos os pares do mesmo tema, sem exigir sinal léxico")
+    pa.add_argument("-n", type=int, default=60)
+    vg = sub.add_parser("vigiar")
+    vg.add_argument("--hook", action="store_true", help="texto para hook de início de sessão; silencioso sem mudança")
+    vg.add_argument("--intervalo", type=int, help="repete a cada N segundos, avisando só quando algo novo mudar")
+    ex = sub.add_parser("extrair")
+    ex.add_argument("arquivo", type=Path)
+    ex.add_argument("--sistema", default="geral")
+    es = sub.add_parser("esquema")
+    es.add_argument("dsn")
+    es.add_argument("--sistema", default="geral")
+    es.add_argument("--saida", type=Path, help="default: .re/extraidos/<sistema>-esquema.sql")
+    pu = sub.add_parser("publicar")
+    pu.add_argument("destino", choices=["jira", "azure"])
+    pu.add_argument("--processo", default="agile")
+    pu.add_argument("--aplicar", action="store_true", help="envia de fato; sem isso, só mostra o plano")
+    pu.add_argument("--delta", action="store_true", help="só itens novos ou em `revisar`")
     sub.add_parser("ligacoes")
     ve = sub.add_parser("ver")
     ve.add_argument("arquivo", type=Path)
@@ -1093,9 +1560,36 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "ver":
         print(ver_arquivo(args.arquivo, args.linhas))
         return 0
+    if args.cmd == "vigiar" and args.hook and not args.re.is_dir():
+        return 0  # hook em projeto sem .re: silêncio
     if not args.re.is_dir():
         print(f"{args.re} não existe", file=sys.stderr)
         return 2
+    if args.cmd == "vigiar":
+        if args.hook:
+            print(mensagem_vigiar(vigiar(args.re)))
+            return 0
+        if not args.intervalo:
+            print(json.dumps(vigiar(args.re), ensure_ascii=False, indent=2))
+            return 0
+        import time
+        visto = None
+        while True:
+            rel = vigiar(args.re)
+            assinatura = json.dumps(rel, sort_keys=True)
+            if rel["mudancas"] and assinatura != visto:
+                print(mensagem_vigiar(rel), flush=True)
+            visto = assinatura
+            time.sleep(args.intervalo)
+    if args.cmd == "extrair":
+        print(f"gerado {extrair(args.arquivo, args.re, args.sistema)}")
+        return 0
+    if args.cmd == "esquema":
+        saida = args.saida or args.re / "extraidos" / f"{args.sistema}-esquema.sql"
+        saida.parent.mkdir(parents=True, exist_ok=True)
+        saida.write_text(esquema_banco(args.dsn))
+        print(f"gerado {saida}")
+        return 0
     if args.cmd == "fontes":
         print(json.dumps(scan_fontes(args.re, args.update), ensure_ascii=False, indent=2))
         return 0
@@ -1116,7 +1610,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 1 if any(report.values()) else 0
     if args.cmd == "pares":
-        print(json.dumps(pares_revisar(model), ensure_ascii=False, indent=2))
+        print(json.dumps(pares_amplos(model, args.n) if args.amplo else pares_revisar(model), ensure_ascii=False, indent=2))
         return 0
     if args.cmd == "ligacoes":
         print(json.dumps(ligacoes(args.re, model), ensure_ascii=False, indent=2))
@@ -1139,6 +1633,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "diff":
         print(json.dumps(diff_baseline(args.re, model, args.baseline), ensure_ascii=False, indent=2))
+        return 0
+    if args.cmd == "publicar":
+        print(json.dumps(publicar(args.re, model, args.destino, args.aplicar, args.processo, args.delta),
+                         ensure_ascii=False, indent=2))
         return 0
     if args.cmd == "exportar":
         text = export_jira(model, args.delta) if args.destino == "jira" else export_azure(model, args.processo, args.delta)

@@ -81,3 +81,19 @@ def test_rag_index_and_search_without_llm(tmp_path: Path) -> None:
     assert rel["chunks"] == 1
     pacote = call("rag_buscar", projeto=str(tmp_path), atividade="elicitacao", consulta="comissão", llm="none")
     assert pacote["strategy"] == "baseline" and pacote["evidence"][0]["sistema"] == "SIS-01"
+
+
+def test_ferramentas_da_05(tmp_path: Path) -> None:
+    names = {t.name for t in asyncio.run(mcp_server.mcp.list_tools())}
+    assert {"re_vigiar", "re_extrair", "re_esquema", "re_publicar", "rag_contradicoes"} <= names
+    call("re_init", projeto=str(tmp_path), nome="x")
+    (tmp_path / ".re" / "modelo" / "requisitos.json").write_text(json.dumps({"itens": [
+        {"id": "RN-001", "enunciado": "Reembolso pago na folha.", "status": "hipótese"},
+        {"id": "RF-001", "enunciado": "Reembolso pago por PIX.", "status": "hipótese"}]}))
+    assert call("re_pares", projeto=str(tmp_path), amplo=True)[0]["a"] == "RN-001"
+    assert call("re_vigiar", projeto=str(tmp_path))["mudancas"] == 0
+    assert call("re_publicar", projeto=str(tmp_path), destino="jira")["plano"] == []
+    (tmp_path / "a.csv").write_text("x,y\n1,2\n")
+    assert call("re_extrair", projeto=str(tmp_path), arquivo="a.csv").endswith("geral-a.md")
+    with pytest.raises(Exception, match="não suportado"):
+        asyncio.run(mcp_server.mcp.call_tool("re_esquema", {"projeto": str(tmp_path), "dsn": "oracle://x/y"}))

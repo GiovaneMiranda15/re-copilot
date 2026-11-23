@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+
 import hashlib
 import os
 import re
@@ -67,8 +69,9 @@ class FastEmbedEmbedder:
         return _normalize(np.array(list(self._model.query_embed([text])), dtype=np.float32))[0]
 
 
+@functools.lru_cache(maxsize=4)
 def get_embedder(spec: str) -> Embedder:
-    """`hash`, `hash:<dim>`, `fastembed` ou `fastembed:<modelo>`."""
+    """`hash`, `hash:<dim>`, `fastembed` ou `fastembed:<modelo>`. Em cache: carregar o modelo ONNX custa ~1 s."""
     kind, _, arg = spec.partition(":")
     if kind == "hash":
         return HashEmbedder(int(arg) if arg else 512)

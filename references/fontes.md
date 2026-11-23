@@ -45,9 +45,22 @@ Por formato:
 | `.sql` (dump/backup) | indexa direto: o motor mantém só a estrutura (DDL, constraints, procedures, triggers, comments) e descarta `INSERT`/`COPY`. Sem motor: leia o arquivo **filtrando** com `grep -v -iE '^(INSERT\|COPY)'` ou equivalente; nunca carregue blocos de dados |
 | ERD (png, jpg, pdf de imagem) | leia a imagem e transcreva para `.re/extraidos/<sistema>-<nome>.md`: entidades, atributos-chave, relações e cardinalidades (Mermaid `erDiagram`) e observações |
 | BPMN, drawio (XML) | extraia raias, tarefas, gateways e fluxos para `.re/extraidos/…md` (processo em lista numerada) |
-| csv, xlsx | o motor indexa só o cabeçalho do csv. Analise as linhas com script para achar padrões e contagens (agregados, nunca registros) e transcreva cabeçalhos, tipos, regras e agregados para `.re/extraidos/`. Sem dados pessoais |
-| docx | `pandoc -t plain` se existir; senão peça exportação para PDF |
+| csv | `recop.py extrair` gera o mesmo perfil do xlsx; o motor sozinho indexa só o cabeçalho. Analise as linhas com script para achar padrões e contagens (agregados, nunca registros) e transcreva cabeçalhos, tipos, regras e agregados para `.re/extraidos/`. Sem dados pessoais |
+| docx, pptx | `recop.py extrair <arquivo> --sistema SIS-01`: transcreve para `.re/extraidos/` (títulos, parágrafos, tabelas, slides) |
+| xlsx | `recop.py extrair <arquivo>`: só cabeçalho, contagem e perfil das colunas (tipo, preenchimento, mín/máx, categorias de baixa cardinalidade). Nunca registros |
 | código-fonte | não indexe; use Grep/Read direcionados (rotas, entidades, regras) e cite `[código: path:linha]` |
+
+**Banco ao vivo (só leitura, só estrutura):** quando o usuário autorizar e fornecer o acesso, extraia o DDL sem dados:
+
+```bash
+python3 -I <skill>/scripts/recop.py esquema "postgresql://usuario_leitura@host:5432/banco" --sistema SIS-01
+python3 -I <skill>/scripts/recop.py esquema "mysql://usuario_leitura@host/banco" --sistema SIS-02
+python3 -I <skill>/scripts/recop.py esquema "sqlite:///caminho/arquivo.db" --sistema SIS-03
+```
+
+Usa `pg_dump --schema-only` e `mysqldump --no-data` (cliente instalado na máquina) ou o SQLite em modo somente
+leitura. A senha vai por `PGPASSWORD`/`MYSQL_PWD`, que o usuário define; o comando recusa DSN com senha. Peça um
+usuário só de leitura. O resultado vai para `.re/extraidos/<sistema>-esquema.sql` e é indexado como um dump.
 
 Transcrições em `.re/extraidos/` são indexadas com o mesmo `--sistema` da fonte original.
 Registre a transcrição como fonte, citando a original na primeira linha.

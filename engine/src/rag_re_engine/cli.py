@@ -10,7 +10,7 @@ from pathlib import Path
 from rag_re_engine.embeddings import get_embedder
 from rag_re_engine.engine import PIPELINES, retrieve
 from rag_re_engine.evaluation import evaluate, load_dataset, to_markdown
-from rag_re_engine.operacoes import DEFAULT_EMBEDDER, construir, indexar, resolver_llm
+from rag_re_engine.operacoes import DEFAULT_EMBEDDER, construir, contradicoes, indexar, resolver_llm
 from rag_re_engine.models import EvidencePackage
 from rag_re_engine.store import SqliteStore
 from rag_re_engine.strategies import Activity
@@ -23,7 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    idx = sub.add_parser("index", help="Indexa um diretório de documentos (txt, md, pdf, sql).")
+    idx = sub.add_parser("index", help="Indexa um diretório de documentos (txt, md, pdf, sql, csv).")
     idx.add_argument("corpus", type=Path)
     idx.add_argument("--db", type=Path, required=True)
     idx.add_argument("--embedder", default=DEFAULT_EMBEDDER, help="hash[:dim] | fastembed[:modelo] (default: multilíngue)")
@@ -49,6 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
     bd.add_argument("--db", type=Path, required=True)
     bd.add_argument("--what", default="raptor,graph", help="raptor, graph ou ambos (default: raptor,graph)")
     bd.add_argument("--llm", default="auto")
+
+    ct = sub.add_parser("contradicoes", help="LLM julga os pares de requisitos do mesmo tema (recop.py pares --amplo).")
+    ct.add_argument("--re", type=Path, default=Path(".re"))
+    ct.add_argument("--llm", default="auto")
+    ct.add_argument("-n", type=int, default=60, help="quantos pares avaliar (os de maior peso)")
+    ct.add_argument("--lote", type=int, default=8)
 
     ev = sub.add_parser("evaluate", help="Compara estratégias sobre um dataset JSONL anotado.")
     ev.add_argument("--db", type=Path, required=True)
@@ -99,6 +105,8 @@ def _cmd_index(args: argparse.Namespace) -> int:
         print(rel["aviso"], file=sys.stderr)
         return 1
     print(f"{rel['documentos']} documentos, {rel['chunks']} chunks indexados em {args.db} ({rel['embedder']})")
+    if rel.get("aviso"):
+        print(f"aviso: {rel['aviso']}", file=sys.stderr)
     return 0
 
 
@@ -131,6 +139,16 @@ def _cmd_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_contradicoes(args: argparse.Namespace) -> int:
+    try:
+        rel = contradicoes(args.re, args.llm, args.n, args.lote)
+    except RuntimeError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    print(json.dumps(rel, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _cmd_evaluate(args: argparse.Namespace) -> int:
     store, embedder = _open_store(args.db)
     strategies = [s.strip() for s in args.strategies.split(",") if s.strip()]
@@ -147,7 +165,8 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    handlers = {"index": _cmd_index, "retrieve": _cmd_retrieve, "context": _cmd_context, "build": _cmd_build, "evaluate": _cmd_evaluate}
+    handlers = {"index": _cmd_index, "retrieve": _cmd_retrieve, "context": _cmd_context, "build": _cmd_build, "evaluate": _cmd_evaluate,
+                "contradicoes": _cmd_contradicoes}
     return handlers[args.command](args)
 
 

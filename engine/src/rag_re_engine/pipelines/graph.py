@@ -208,7 +208,7 @@ class GraphRagPipeline:
         seeds = self._seed_entities(query, qv, out)
         if not seeds:
             out.trace.append("grafo não construído (rode `build --what graph`); usando similaridade")
-            out.evidence = [to_evidence(h) for h in self.store.search(qv, self.k)]
+            out.evidence = [to_evidence(h) for h in self.store.search(qv, self.k, query_text=query)]
             return out
         if self.store.get_meta("derivados_desatualizados") == "1":
             out.trace.append("atenção: fontes reindexadas depois do último `build`; grafo pode estar desatualizado")
@@ -237,7 +237,7 @@ class GraphRagPipeline:
         out.evidence = [to_evidence(ScoredChunk(c, float(scores[c.chunk_id]))) for c in chunks]
         if len(out.evidence) < self.k:  # entidades pouco conectadas: completa com similaridade
             have = {e.chunk_id for e in out.evidence}
-            extra = self.store.search(qv, self.k - len(out.evidence), exclude=have)
+            extra = self.store.search(qv, self.k - len(out.evidence), exclude=have, query_text=query)
             out.evidence += [to_evidence(h) for h in extra]
             out.trace.append(f"completado com {len(extra)} chunks por similaridade")
         return out

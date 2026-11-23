@@ -63,7 +63,7 @@ class SelfRagPipeline:
         current, seen = query, set()
         kept: list[tuple[ScoredChunk, float]] = []
         for iteration in range(1, cfg.max_iter + 1):
-            hits = self.store.search(self.embedder.embed_query(current), cfg.k, exclude=seen)
+            hits = self.store.search(self.embedder.embed_query(current), cfg.k, exclude=seen, query_text=current)
             seen |= {h.chunk.chunk_id for h in hits}
             out.trace.append(f"iter {iteration}: retrieve '{current[:80]}' -> {len(hits)} chunks")
             if not hits:

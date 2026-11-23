@@ -9,6 +9,7 @@
 #   ./install.sh --agents <arquivo>   qualquer agente que leia um arquivo de instruções (AGENTS.md etc.)
 #   ./install.sh --motor              instala as dependências do motor RAG e do servidor MCP (uv sync)
 #   ./install.sh --mcp                mostra como registrar o servidor MCP nos clientes
+#   ./install.sh --hook <projeto>     Claude Code: avisa no início de cada sessão quando as fontes do projeto mudam
 #
 # Os blocos de instruções ficam entre marcadores e são substituídos ao reinstalar.
 set -euo pipefail
@@ -67,6 +68,29 @@ claude() {
   echo "reinicie o Claude Code e digite: re-copilot"
 }
 
+hook_sessao() {
+  # Hook SessionStart do Claude Code: o texto de `recop.py vigiar --hook` entra no contexto da sessão.
+  local projeto settings
+  projeto="$(cd "$1" && pwd)"
+  settings="$projeto/.claude/settings.json"
+  mkdir -p "$projeto/.claude"
+  RE_CMD="python3 -I \"$SRC/scripts/recop.py\" --re \"$projeto/.re\" vigiar --hook" python3 - "$settings" <<'PY'
+import json, os, sys
+caminho = sys.argv[1]
+cfg = json.load(open(caminho)) if os.path.exists(caminho) and os.path.getsize(caminho) else {}
+cmd = os.environ["RE_CMD"]
+grupos = cfg.setdefault("hooks", {}).setdefault("SessionStart", [])
+# Remove a versão anterior do hook do re-copilot antes de gravar a nova (idempotente).
+for g in grupos:
+    g["hooks"] = [h for h in g.get("hooks", []) if "recop.py" not in h.get("command", "")]
+grupos[:] = [g for g in grupos if g["hooks"]]
+grupos.append({"matcher": "startup|resume", "hooks": [{"type": "command", "command": cmd, "timeout": 60}]})
+json.dump(cfg, open(caminho, "w"), ensure_ascii=False, indent=2)
+open(caminho, "a").write("\n")
+PY
+  echo "hook gravado em $settings (fontes alteradas aparecem no início de cada sessão do Claude Code)"
+}
+
 mcp_ajuda() {
   cat <<TXT
 Servidor MCP: re-copilot-mcp (stdio). Comando para os clientes:
@@ -101,5 +125,8 @@ case "${1:-}" in
     (cd "$SRC" && uv sync --extra embeddings --extra mcp)
     echo "motor pronto: uv run --project \"$SRC\" rag-re-engine --help" ;;
   --mcp) mcp_ajuda ;;
-  *) sed -n '2,13p' "$0"; exit 2 ;;
+  --hook)
+    [ -n "${2:-}" ] || { echo "uso: ./install.sh --hook <pasta do projeto>" >&2; exit 2; }
+    hook_sessao "$2" ;;
+  *) sed -n '2,14p' "$0"; exit 2 ;;
 esac

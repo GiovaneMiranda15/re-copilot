@@ -46,7 +46,7 @@ class AgenticRagPipeline:
                 break
             out.trace.append(f"rodada {round_no}: buscas {pending}")
             for sub in pending:
-                rankings.append(self.store.search(self.embedder.embed_query(sub), self.k))
+                rankings.append(self.store.search(self.embedder.embed_query(sub), self.k, query_text=sub))
                 done.add(sub)
             merged = rrf(rankings, self.k * 2)
             if round_no == self.max_rounds or not merged:

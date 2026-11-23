@@ -29,4 +29,4 @@ class LocalRequery:
         self.embedder = embedder
 
     def search(self, query: str, k: int, exclude: set[str]) -> list[ScoredChunk]:
-        return self.store.search(self.embedder.embed_query(query), k, exclude=exclude)
+        return self.store.search(self.embedder.embed_query(query), k, exclude=exclude, query_text=query)

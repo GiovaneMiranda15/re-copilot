@@ -10,8 +10,18 @@ registre no histórico).
 | Gatilho | Origem | Exemplo |
 |---|---|---|
 | `manual` | o usuário descreve ou cola uma mudança (`mudança: …`, `avaliar ata.pdf`) | ata de diretoria |
-| `fonte` | `recop.py fontes` acusa fonte nova ou alterada | dump novo de um sistema legado |
+| `fonte` | `recop.py vigiar` (ou o hook de início de sessão) acusa fonte nova, alterada ou removida | dump novo de um sistema legado |
 | `fluxo` | uma resposta de entrevista, um trecho recuperado ou uma análise traz algo que toca requisitos existentes | perfil financeiro cita regra nova |
+
+**Gatilho automático.** `recop.py vigiar` compara as fontes com `.re/fontes.json` e lista, para cada fonte alterada ou
+removida, os itens do modelo que a citam. Não grava nada. Três formas de disparar sem o usuário pedir:
+
+- `install.sh --hook <projeto>`: no Claude Code, o aviso entra no início de cada sessão do projeto;
+- `recop.py vigiar --intervalo 300`: vigia em segundo plano e avisa quando algo novo mudar;
+- ferramenta MCP `re_vigiar`, para qualquer cliente MCP, ao retomar o projeto.
+
+Ao receber o aviso: leia o que mudou, passe cada informação pelo classificador, rode `impacto` nos itens citados e só
+então `recop.py fontes --update`, para não perder a diferença.
 
 ## 2. Classificador
 

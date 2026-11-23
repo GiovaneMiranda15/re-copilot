@@ -66,9 +66,11 @@ e um resumo. Pergunte se o usuário quer resolver agora.
 Gere os entregáveis (`entregaveis.md`) e o backlog (`backlog-export.md`). Hipóteses entram
 no corpo com a marca `[hipótese]`, para o documento ficar completo; conflitos e perguntas
 vão para "Pendências". Rode `recop.py lint`, `recop.py pares` e `recop.py verificar --docs <pasta>` e trate o que
-apontarem. **Revise as contradições:** cada par do `pares` vira `rel.conflita_com` ou é descartado. Para cada regra de
-exclusividade ("só", "apenas"), rode também `recop.py candidatos "<verbo da regra>" -n 40` (ex.: "pagar") e leia os itens
-listados: `pares` não encontra tudo. Revise como leitor: o gestor sabe o que decidir? O dev sabe por onde começar?
+apontarem. **Revise as contradições:** cada par do `pares` vira `rel.conflita_com` ou é descartado. `pares` só vê sinal
+léxico (polaridade, números, exclusividade) e perde contradições de sentido ("pago na folha" × "pago por PIX em 2 dias").
+Por isso rode também `recop.py pares --amplo` e julgue cada par lendo os dois enunciados (contradição, complementar ou
+independente). Com motor e LLM, `rag-re-engine contradicoes --re .re` faz esse julgamento em lotes; confira cada
+contradição sugerida antes de registrar. Revise como leitor: o gestor sabe o que decidir? O dev sabe por onde começar?
 
 ## 7. `validacao`
 

@@ -81,16 +81,7 @@ cd engine && uv run --extra embeddings rag-re-engine evaluate --db <db> \
 
 Guarde dados de experimento em `docs/validacao/experimento/`, nunca em `/tmp`: um reinício os apaga.
 
-## Rumo ao formulário com engenheiros
+## Avaliação com engenheiros
 
-A avaliação com pessoas ainda não foi feita. Dimensões sugeridas, alinhadas às métricas acima, para
-comparar a opinião humana com os juízes:
-
-- **Perfil:** papel, anos de experiência, se já fez levantamento de requisitos.
-- **Tarefa:** projeto real ou caso sintético, tamanho das fontes, tempo gasto, retrabalho.
-- **Utilidade (Likert 1 a 5):** diagnóstico, perguntas, documentação de negócio, documentação técnica,
-  backlog e manutenção. Reaproveitaria o entregável sem reescrever?
-- **Confiança:** encontrou informação inventada? As citações ajudaram a conferir?
-- **Comparação:** preferiu isto ou o processo atual (e a IA comum)? Faria de novo?
-- **Modelos de aceitação:** SUS (usabilidade) e TAM (utilidade e facilidade percebidas).
-- **Aberta:** o que faltou, o que atrapalhou, o que foi errado.
+Formulário pronto em [`formulario.md`](formulario.md) (perfil, tarefa, utilidade, confiança, SUS, TAM e abertas),
+alinhado às dimensões dos juízes para comparar a opinião humana com a da IA.

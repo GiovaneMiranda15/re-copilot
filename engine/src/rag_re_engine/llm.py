@@ -101,11 +101,12 @@ class AnthropicLLM:
 class OpenAICompatibleLLM:
     """Qualquer servidor com a API de chat compatível com OpenAI (OpenAI, Ollama, vLLM, LM Studio, gateways)."""
 
-    def __init__(self, model: str, base_url: str, api_key: str | None, label: str, timeout_s: int = 180) -> None:
+    def __init__(self, model: str, base_url: str, api_key: str | None, label: str, timeout_s: int | None = None) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
-        self.timeout_s = timeout_s
+        # Modelo local em CPU pode levar minutos na primeira resposta; RE_LLM_TIMEOUT ajusta.
+        self.timeout_s = timeout_s or int(os.environ.get("RE_LLM_TIMEOUT", "600" if label == "ollama" else "180"))
         self.name = f"{label}:{model}"
 
     def complete(self, prompt: str) -> str:
@@ -165,9 +166,11 @@ def parse_json(text: str) -> dict | list:
     """Extrai o primeiro objeto/array JSON de uma resposta de LLM (tolera texto e cercas ```)."""
     fence = re.search(r"```(?:json)?\s*([\[{].*[\]}])\s*```", text, re.S)
     candidates = [fence.group(1)] if fence else []
-    for opener, closer in (("{", "}"), ("[", "]")):
-        start, end = text.find(opener), text.rfind(closer)
-        if start != -1 and end > start:
+    # O que abre primeiro manda: uma lista de objetos começa com "[", não com o "{" do primeiro item.
+    pares = sorted((text.find(o), o, c) for o, c in (("{", "}"), ("[", "]")) if text.find(o) != -1)
+    for start, _, closer in pares:
+        end = text.rfind(closer)
+        if end > start:
             candidates.append(text[start : end + 1])
     for candidate in candidates:
         try:

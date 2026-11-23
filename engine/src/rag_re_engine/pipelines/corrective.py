@@ -91,7 +91,7 @@ class CorrectiveRagPipeline:
     def run(self, query: str) -> PipelineOutput:
         cfg = self.config
         out = PipelineOutput(evidence=[])
-        hits = self.store.search(self.embedder.embed_query(query), cfg.k)
+        hits = self.store.search(self.embedder.embed_query(query), cfg.k, query_text=query)
         out.trace.append(f"retrieve: top-{cfg.k} ({len(hits)} chunks)")
         if not hits:
             out.trace.append("índice vazio: nada a avaliar")

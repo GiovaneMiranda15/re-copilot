@@ -1,0 +1,31 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Testes
+        run: uv sync --extra anthropic --extra mcp && uv run pytest -q
+      - name: Pacote
+        run: |
+          uv build
+          test "v$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)" = "$GITHUB_REF_NAME"
+      - name: Skill em zip
+        run: git archive --format=zip --prefix=re-copilot/ -o "dist/re-copilot-skill-$GITHUB_REF_NAME.zip" HEAD
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notas=$(awk '/^## /{n++} n==1' CHANGELOG.md)
+          gh release create "$GITHUB_REF_NAME" dist/* --title "re-copilot $GITHUB_REF_NAME" --notes "$notas"

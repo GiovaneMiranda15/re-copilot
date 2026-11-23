@@ -183,3 +183,22 @@ def test_csv_index_keeps_header_only(tmp_path) -> None:
     text = load_documents(tmp_path)["p.csv"]
     assert "nome,cpf,valor" in text and "Linhas de dados: 2" in text
     assert "Fulana" not in text and "123456" not in text
+
+
+def test_busca_hibrida_acha_identificador_que_o_embedding_confunde(tmp_path) -> None:
+    from rag_re_engine.embeddings import get_embedder
+    from rag_re_engine.ingest import chunk_text
+    from rag_re_engine.store import SqliteStore
+
+    emb = get_embedder("hash:64")  # dimensão baixa: colisões imitam um embedding que não separa números
+    textos = {f"doc{i}.md": f"Na filial {100 + i}, o limite de aprovação é definido pelo gerente regional." for i in range(40)}
+    store = SqliteStore(tmp_path / "i.db")
+    chunks = [c for d, t in textos.items() for c in chunk_text(d, t, 500, 0)]
+    store.add(chunks, emb.embed([c.text for c in chunks]), emb.name)
+    consulta = "limite de aprovação da filial 137"
+    hibrida = store.search(emb.embed_query(consulta), 3, query_text=consulta)
+    assert hibrida[0].chunk.doc_id == "doc37.md"
+    reaberto = SqliteStore(tmp_path / "i.db")  # índice existente: FTS já preenchido
+    assert reaberto.search(emb.embed_query(consulta), 1, query_text=consulta)[0].chunk.doc_id == "doc37.md"
+    store.delete_docs(["doc37.md"])
+    assert all(h.chunk.doc_id != "doc37.md" for h in store.search(emb.embed_query(consulta), 3, query_text=consulta))

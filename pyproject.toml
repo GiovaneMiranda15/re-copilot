@@ -1,6 +1,6 @@
 [project]
 name = "re-copilot"
-version = "0.4.0"
+version = "0.5.0"
 description = "Copiloto de Engenharia de Requisitos: diagnóstico, entrevistas por perfil, documentação, backlog e manutenção de requisitos, com RAG por etapa."
 readme = "README.md"
 license = "MIT"
@@ -21,7 +21,7 @@ all = ["re-copilot[embeddings,anthropic,mcp]"]
 
 [project.scripts]
 rag-re-engine = "rag_re_engine.cli:main"
-recop = "recop:main"
+recop = "rag_re_engine.skill_files:recop_main"
 re-copilot-mcp = "rag_re_engine.mcp_server:main"
 
 [project.urls]

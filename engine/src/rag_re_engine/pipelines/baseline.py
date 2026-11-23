@@ -19,6 +19,6 @@ class BaselinePipeline:
         self.k = k
 
     def run(self, query: str) -> PipelineOutput:
-        hits = self.store.search(self.embedder.embed_query(query), self.k)
+        hits = self.store.search(self.embedder.embed_query(query), self.k, query_text=query)
         evidence = [Evidence(h.chunk.doc_id, h.chunk.chunk_id, h.chunk.text, h.similarity, sistema=h.chunk.sistema) for h in hits]
         return PipelineOutput(evidence=evidence, trace=[f"retrieve: top-{self.k} por similaridade ({len(hits)} chunks)"])

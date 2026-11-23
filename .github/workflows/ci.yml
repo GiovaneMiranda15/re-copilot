@@ -22,9 +22,12 @@ jobs:
           uv build
           unzip -l dist/*.whl | grep -q "rag_re_engine/skill/SKILL.md"
           unzip -l dist/*.whl | grep -q " recop.py"
+          unzip -l dist/*.whl | grep -q "rag_re_engine/skill_files.py"
       - name: Instalador
         run: |
           bash -n install.sh
           ./install.sh --agents "$RUNNER_TEMP/AGENTS.md"
           ./install.sh --agents "$RUNNER_TEMP/AGENTS.md"
           test "$(grep -c 're-copilot:inicio' "$RUNNER_TEMP/AGENTS.md")" = 1
+          mkdir -p "$RUNNER_TEMP/proj" && ./install.sh --hook "$RUNNER_TEMP/proj" && ./install.sh --hook "$RUNNER_TEMP/proj"
+          test "$(grep -c recop.py "$RUNNER_TEMP/proj/.claude/settings.json")" = 1

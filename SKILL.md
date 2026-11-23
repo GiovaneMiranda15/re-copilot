@@ -20,8 +20,9 @@ nem do projeto em que foi criada. `<skill>` abaixo = o diretório deste `SKILL.m
 2. **Não existe** → confirme com o usuário o diretório do projeto, rode `recop.py init <projeto>` e siga `references/workflow.md`.
 3. **Existe** →
    - rode `python3 -I <skill>/scripts/recop.py status` e mostre o painel (`workflow.md`);
-   - rode `recop.py fontes`: se houver fonte nova, alterada ou removida, avise e ofereça o
-     modo manutenção (`references/manutencao.md`);
+   - rode `recop.py vigiar`: se houver fonte nova, alterada ou removida, avise quais itens a citam e ofereça o
+     modo manutenção (`references/manutencao.md`). Com o hook instalado (`install.sh --hook`), esse aviso já chega
+     no início da sessão;
    - retome a fase em que parou.
 
 ## Comandos que o usuário pode dar a qualquer momento
@@ -37,6 +38,9 @@ nem do projeto em que foi criada. `<skill>` abaixo = o diretório deste `SKILL.m
 | `buscar <assunto> [em SIS-02]` | consulta o RAG e mostra evidências | rag.md |
 | `analisar` / `validar` | executa a fase | workflow.md |
 | `verificar` | confere números, citações e IDs contra as fontes | modelo.md |
+| `contradições` | pares do mesmo tema julgados um a um (`pares --amplo`, ou `rag-re-engine contradicoes` com LLM) | workflow.md |
+| `ler banco <dsn>` | extrai a estrutura (sem dados) de um banco ao vivo, só leitura | fontes.md |
+| `publicar no jira` / `publicar no azure` | cria ou atualiza o backlog pela API (mostra o plano antes) | backlog-export.md |
 | `mudança: <texto>` / `avaliar <arquivo>` | classifica, analisa impacto e abre um CR | manutencao.md |
 | `impacto <ID>` | itens afetados por um requisito, regra ou achado | manutencao.md |
 | `baseline` | congela a versão validada | manutencao.md |

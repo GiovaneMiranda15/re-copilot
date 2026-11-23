@@ -117,7 +117,7 @@ class RaptorPipeline:
             out.trace.append("árvore não construída (rode `build --what raptor`); buscando só nos trechos originais")
         elif self.store.get_meta("derivados_desatualizados") == "1":
             out.trace.append("atenção: fontes reindexadas depois do último `build`; resumos podem estar desatualizados")
-        hits = self.store.search(self.embedder.embed_query(query), self.k, all_levels=True)
+        hits = self.store.search(self.embedder.embed_query(query), self.k, all_levels=True, query_text=query)
         for h in hits:
             c = h.chunk
             derived = self.store.children_of(c.chunk_id) if c.nivel > 0 else ()

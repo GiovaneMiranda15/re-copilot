@@ -50,6 +50,10 @@ pelo arquivo e pela seção ou objeto. Para experimentos que comparam as arquite
 Ver `fontes.md` §3. Sempre `--db .re/index.db`, um `--sistema` por pasta e o mesmo
 embedder (`fastembed:sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, ~220 MB
 no primeiro uso). Formatos: txt, md, pdf (via `pdftotext`), sql (só estrutura), csv (só cabeçalho e número de linhas).
+docx, pptx e xlsx: rode `recop.py extrair` e indexe `.re/extraidos` (o `index` avisa quando encontra esses arquivos).
+
+A busca é **híbrida**: vetorial (sentido) + léxica BM25 (números, códigos, nomes de tabela), fundidas por RRF. Numa base
+de centenas de documentos parecidos, a parte léxica é o que acha "filial 137" ou "ck_limite_diaria".
 
 ## Consultar
 
