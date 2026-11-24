@@ -244,7 +244,7 @@ def rag_construir(projeto: str, o_que: list[str] | None = None, llm: str = "auto
     return operacoes.construir(_db(projeto), set(o_que or ["raptor", "graph"]), llm)
 
 
-@mcp.tool(description="LLM julga os pares de requisitos do mesmo tema e aponta contradições de sentido (sugestões a conferir).")
+@mcp.tool(description="LLM julga os pares de requisitos do mesmo tema e aponta contradições de sentido (sugestões a conferir). n=0 julga todos; confira `completo` e `sem_resposta`.")
 def rag_contradicoes(projeto: str, llm: str = "auto", n: int = 60) -> dict:
     _carregar(projeto)
     try:

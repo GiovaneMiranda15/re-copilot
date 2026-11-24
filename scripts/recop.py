@@ -1063,7 +1063,7 @@ def pares_amplos(model: dict, n: int = 60) -> list[dict]:
 
     `pares` só levanta pares com sinal léxico (polaridade, números, exclusividade) e perde contradições
     de sentido. Esta lista não exige sinal: é para o agente (ou `rag-re-engine contradicoes`) ler e julgar.
-    Pares já ligados por qualquer relação ficam de fora.
+    Pares já ligados por qualquer relação ficam de fora. `n` ≤ 0 devolve todos.
     """
     ativos = [r for r in model["requisitos"] if r.get("status") not in {"descartado", "obsoleto"}]
     sinais_lexicos = {(p["a"], p["b"]): p["motivo"] for p in pares_revisar(model, limite=10_000, por_regra_max=10_000)}
@@ -1098,7 +1098,8 @@ def pares_amplos(model: dict, n: int = 60) -> list[dict]:
             peso = sum(1 / freq[w] for w in comuns) * (1.5 if sinais else 1)
             pares.append({"a": a["id"], "b": b["id"], "pontos": round(peso, 3), "termos": sorted(comuns), "sinais": sinais,
                           "enunciado_a": a.get("enunciado", ""), "enunciado_b": b.get("enunciado", "")})
-    return sorted(pares, key=lambda p: (-p["pontos"], p["a"], p["b"]))[:n]
+    pares.sort(key=lambda p: (-p["pontos"], p["a"], p["b"]))
+    return pares[:n] if n > 0 else pares
 
 
 # ---------------------------------------------------------------- vigiar
@@ -1315,6 +1316,31 @@ def _sem_senha(dsn: str) -> str:
     return regex.sub(r"(//[^:/@]+):[^@]*@", r"\1:***@", dsn)
 
 
+# Ruído de sessão dos dumps. Cada padrão casa a linha inteira e só comandos que o próprio dump gera: um `SET` solto pode ser
+# a cláusula de um UPDATE dentro de uma função, e apagá-lo mudaria a regra de negócio.
+RUIDO_DUMP = regex.compile(
+    r"SET (?:statement_timeout|lock_timeout|idle_in_transaction_session_timeout|transaction_timeout|client_encoding|"
+    r"standard_conforming_strings|check_function_bodies|xmloption|client_min_messages|row_security|default_tablespace|"
+    r"default_table_access_method) = [^;]*;"
+    r"|SELECT pg_catalog\.set_config\('search_path', '', false\);"
+    r"|\\(?:un)?restrict \S+"
+    r"|-- Dumped (?:from|by) .*"
+    r"|/\*M?!\d+ SET .*\*/ ?;+|/\*M!\d+\\- enable the sandbox mode \*/ ?"
+    r"|/\*!\d+ DROP \w+ IF EXISTS `[^`]*` ?\*/ ?;+"
+    r"|SET @saved_cs_client += @@character_set_client;|SET character_set_client = (?:@saved_cs_client|\w+);"
+)
+
+
+def _limpar_dump(dump: str) -> str:
+    """Tira o ruído de sessão e o que muda a cada execução (token `\\restrict`, contador AUTO_INCREMENT)."""
+    linhas = [l for l in dump.splitlines() if not RUIDO_DUMP.fullmatch(l.rstrip())]
+    texto = "\n".join(linhas)
+    texto = regex.sub(r"(?m)^(\) ENGINE=\w+) AUTO_INCREMENT=\d+", r"\1", texto)
+    # Tabela provisória que o mysqldump cria antes da view de verdade.
+    texto = regex.sub(r"(?m)^/\*!50001 CREATE VIEW `[^`]*` AS SELECT ?\n(?: (?:1|NULL) AS `[^`]*`,?\s*)+\*/;\n?", "", texto)
+    return regex.sub(r"\n{3,}", "\n\n", texto).strip("\n") + "\n"
+
+
 def esquema_banco(dsn: str, runner=None) -> str:
     """Estrutura (DDL) de um banco ao vivo, sem dados, em conexão de leitura.
 
@@ -1347,18 +1373,24 @@ def esquema_banco(dsn: str, runner=None) -> str:
         proc = runner(["pg_dump", "--schema-only", "--no-owner", "--no-privileges", "--dbname", dsn], dict(os.environ))
         if proc.returncode:
             raise SystemExit(f"pg_dump falhou: {proc.stderr.strip()[:400]}")
-        ddl = "\n".join(l for l in proc.stdout.splitlines() if not l.startswith(("SET ", "SELECT pg_catalog.set_config")))
+        ddl = _limpar_dump(proc.stdout)
     elif url.scheme in {"mysql", "mariadb"}:
-        if exige and not shutil.which("mysqldump"):
+        # O cliente do MariaDB 11+ só traz `mariadb-dump`.
+        exe = next((e for e in ("mysqldump", "mariadb-dump") if shutil.which(e)), None)
+        if exige and not exe:
             raise SystemExit("mysqldump não encontrado: instale o cliente do MySQL/MariaDB")
-        cmd = ["mysqldump", "--no-data", "--skip-comments", "--single-transaction", "--routines", "--triggers",
+        cmd = [exe or "mysqldump", "--no-data", "--skip-comments", "--single-transaction", "--no-tablespaces",
+               "--skip-add-drop-table", "--routines", "--triggers", "--events",
                "-h", url.hostname or "localhost", "-P", str(url.port or 3306)]
         if url.username:
             cmd += ["-u", unquote(url.username)]
         proc = runner(cmd + [url.path.lstrip("/")], dict(os.environ))
         if proc.returncode:
-            raise SystemExit(f"mysqldump falhou: {proc.stderr.strip()[:400]}")
-        ddl = proc.stdout
+            dica = ("\nO usuário de leitura precisa de SELECT, SHOW VIEW, TRIGGER e EVENT no banco e, para ler rotinas, "
+                    "SHOW_ROUTINE (MySQL 8) ou SELECT em mysql.proc (MariaDB)."
+                    if regex.search(r"denied|privilege", proc.stderr, regex.I) else "")
+            raise SystemExit(f"mysqldump falhou: {proc.stderr.strip()[:400]}{dica}")
+        ddl = _limpar_dump(proc.stdout)
     else:
         raise SystemExit(f"esquema não suportado: {url.scheme} (sqlite, postgresql, mysql)")
     return f"-- estrutura de {_sem_senha(dsn)} (recop.py esquema; sem dados)\n" + mascarar(ddl)

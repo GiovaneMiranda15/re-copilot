@@ -1,0 +1,152 @@
+{
+  "pares": 36,
+  "armadilhas": 13,
+  "autoria": "autor da ferramenta",
+  "candidatos_no_projeto_inteiro": {
+    "pares_possiveis": 2556,
+    "candidatos": 196,
+    "recall_top60": 0.938,
+    "recall_top120": 0.938,
+    "recall_todos": 1.0
+  },
+  "lexico (recop.py pares)": {
+    "contradicoes_reais": 16,
+    "apontadas": 8,
+    "corretas": 4,
+    "precisao": 0.5,
+    "recall": 0.25,
+    "f1": 0.333,
+    "recall_superficie": 0.333,
+    "recall_sentido": 0.2,
+    "armadilhas_falsas": 4,
+    "falsos": [
+      [
+        "O prazo de resposta do chamado crítico é de 1 hora.",
+        "O prazo de resposta do chamado comum é de 8 horas."
+      ],
+      [
+        "A busca responde em até 2 segundos para 95% das consultas.",
+        "A exportação da busca pode levar até 60 segundos."
+      ],
+      [
+        "O prazo de entrega do pedido é de 5 dias.",
+        "O prazo de validade do orçamento é de 15 dias."
+      ],
+      [
+        "O contrato do fornecedor vence em 12 meses.",
+        "O contrato de trabalho temporário vence em 6 meses."
+      ]
+    ],
+    "perdidas": [
+      [
+        "O vendedor pode alterar o preço do item.",
+        "O vendedor não pode alterar o preço do item."
+      ],
+      [
+        "A senha deve ter no mínimo 12 caracteres.",
+        "A senha deve ter no máximo 8 caracteres."
+      ],
+      [
+        "O sistema deve bloquear o cliente após 2 parcelas vencidas.",
+        "O sistema deve bloquear o cliente após 4 parcelas vencidas."
+      ],
+      [
+        "O cupom é cumulativo com outras promoções.",
+        "O cupom não é cumulativo com outras promoções."
+      ],
+      [
+        "O reembolso é creditado na folha do mês seguinte.",
+        "O reembolso é pago por PIX em dois dias úteis."
+      ],
+      [
+        "O cadastro do paciente é excluído a pedido do titular.",
+        "O cadastro do paciente é mantido permanentemente para auditoria."
+      ],
+      [
+        "O estoque é baixado na separação do pedido.",
+        "O estoque é baixado na emissão da nota fiscal do pedido."
+      ],
+      [
+        "Toda compra passa por cotação com três fornecedores.",
+        "Compras recorrentes são emitidas direto ao fornecedor homologado."
+      ],
+      [
+        "O aplicativo funciona sem conexão durante a visita.",
+        "Cada resposta da visita é validada em tempo real no servidor."
+      ],
+      [
+        "O acesso ao painel usa a conta corporativa, sem senha própria.",
+        "O usuário do painel define uma senha no primeiro acesso."
+      ],
+      [
+        "A comissão é calculada sobre o valor faturado.",
+        "A comissão é calculada sobre o valor recebido."
+      ],
+      [
+        "O laudo é liberado automaticamente quando o exame termina.",
+        "Nenhum laudo chega ao paciente sem assinatura do médico."
+      ]
+    ]
+  },
+  "llm claude:haiku": {
+    "contradicoes_reais": 16,
+    "apontadas": 17,
+    "corretas": 16,
+    "precisao": 0.941,
+    "recall": 1.0,
+    "f1": 0.97,
+    "recall_superficie": 1.0,
+    "recall_sentido": 1.0,
+    "armadilhas_falsas": 1,
+    "falsos": [
+      [
+        "O desconto máximo é de 10%.",
+        "Com autorização do diretor, o desconto pode passar de 10%."
+      ]
+    ],
+    "perdidas": [],
+    "julgados": 36,
+    "sem_resposta": 0,
+    "segundos": 56.8,
+    "avisos": []
+  },
+  "llm claude:sonnet": {
+    "contradicoes_reais": 16,
+    "apontadas": 16,
+    "corretas": 16,
+    "precisao": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "recall_superficie": 1.0,
+    "recall_sentido": 1.0,
+    "armadilhas_falsas": 0,
+    "falsos": [],
+    "perdidas": [],
+    "julgados": 36,
+    "sem_resposta": 0,
+    "segundos": 38.7,
+    "avisos": []
+  },
+  "llm ollama:qwen3:4b-instruct (lote 4)": {
+    "contradicoes_reais": 16,
+    "apontadas": 15,
+    "corretas": 15,
+    "precisao": 1.0,
+    "recall": 0.938,
+    "f1": 0.968,
+    "recall_superficie": 1.0,
+    "recall_sentido": 0.9,
+    "armadilhas_falsas": 0,
+    "falsos": [],
+    "perdidas": [
+      [
+        "Toda compra passa por cotação com três fornecedores.",
+        "Compras recorrentes são emitidas direto ao fornecedor homologado."
+      ]
+    ],
+    "julgados": 36,
+    "sem_resposta": 0,
+    "segundos": 1114.4,
+    "avisos": []
+  }
+}

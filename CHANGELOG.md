@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.1 — correções da validação
+
+- **`esquema` (PostgreSQL) apagava linhas `SET …` de dentro de funções** (a cláusula de um `UPDATE`, por exemplo) e mudava a regra
+  extraída. Quem extraiu com a 0.5.0 um banco com funções deve extrair de novo.
+- `esquema` (MySQL/MariaDB), agora testado em servidores reais: inclui eventos agendados, dispensa o privilégio PROCESS, não expõe o
+  contador `AUTO_INCREMENT`, aceita `mariadb-dump`, remove o ruído de sessão e explica que permissões faltam.
+- A saída de `esquema` não muda entre execuções sem mudança no banco (o token `\restrict` do pg_dump saía diferente a cada vez e
+  fazia o `vigiar` acusar alteração).
+- `rag-re-engine contradicoes`: par sem resposta é repetido e, se faltar, relatado em `sem_resposta`; `cobertura` mostra o que ficou fora;
+  `completo` diz se tudo foi julgado; `-n 0` julga todos; se nada foi julgado, é erro, e não "nenhuma contradição".
+- `engine/benchmarks/contradicoes.py`: 36 pares rotulados, com 13 armadilhas.
+
 ## 0.5.0 — integrações, gatilho automático e busca híbrida
 
 - **Gatilho automático de manutenção:** `recop.py vigiar` lista as fontes que mudaram e os itens que as citam;

@@ -103,8 +103,8 @@ Escolha o provedor com `--llm` (padrão `auto`):
 
 Por padrão a skill **lê as fontes diretamente até 300 KB** e só usa o RAG acima disso, porque nas bases pequenas
 testadas ele custou mais tempo sem melhorar a cobertura. Peça "use RAG" para forçar. A busca é híbrida: numa base de
-600 documentos parecidos, a busca só vetorial achou o documento certo em 15% das consultas; a híbrida, em 87%. Todas as arquiteturas são
-adaptações das originais, e cada módulo em `engine/src/rag_re_engine/pipelines/` diz o que foi adaptado.
+600 documentos sintéticos parecidos, que favorece a busca por palavras, a busca só vetorial achou o documento certo em 15%
+das consultas; a híbrida, em 87%. Todas as arquiteturas são adaptações das originais, e cada módulo em `engine/src/rag_re_engine/pipelines/` diz o que foi adaptado.
 
 ## Segurança e dados
 
@@ -123,7 +123,6 @@ Resultados completos em [`docs/validacao/resultados/`](docs/validacao/resultados
 | 01: v1 em dois casos sintéticos | Não superou a IA comum nem a skill timovi |
 | 02: v3 em caso novo, independente | Melhor documentação (4,86 de 5, contra 4,00), mas **menor cobertura** (92%, contra 99% e 96%) |
 | 03: v3 em projeto real | Fiel às notas (36 de 40 cobertas, 0 citações incorretas), com status `confirmado` inflado, corrigido na v4 |
-
 | 0.5: testes de funcionamento | Manutenção em 3 sessões, hook e MCP no Claude Code, banco PostgreSQL real, Ollama local achando contradição que a checagem léxica perdeu, escala de 600 documentos ([detalhes](docs/validacao/resultados/v05-funcionamento.md)) |
 
 Ainda não provado: se a v4/v5 recuperou a cobertura (rodada 04), o uso por outras pessoas, a publicação contra um Jira

@@ -60,7 +60,8 @@ python3 -I <skill>/scripts/recop.py esquema "sqlite:///caminho/arquivo.db" --sis
 
 Usa `pg_dump --schema-only` e `mysqldump --no-data` (cliente instalado na máquina) ou o SQLite em modo somente
 leitura. A senha vai por `PGPASSWORD`/`MYSQL_PWD`, que o usuário define; o comando recusa DSN com senha. Peça um
-usuário só de leitura. O resultado vai para `.re/extraidos/<sistema>-esquema.sql` e é indexado como um dump.
+usuário só de leitura; no MySQL/MariaDB ele precisa de `SELECT, SHOW VIEW, TRIGGER, EVENT` no banco e, para ler rotinas,
+de `SHOW_ROUTINE` (MySQL 8) ou `SELECT` em `mysql.proc` (MariaDB). O resultado vai para `.re/extraidos/<sistema>-esquema.sql` e é indexado como um dump.
 
 Transcrições em `.re/extraidos/` são indexadas com o mesmo `--sistema` da fonte original.
 Registre a transcrição como fonte, citando a original na primeira linha.

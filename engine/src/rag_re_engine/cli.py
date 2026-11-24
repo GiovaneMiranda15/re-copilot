@@ -53,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     ct = sub.add_parser("contradicoes", help="LLM julga os pares de requisitos do mesmo tema (recop.py pares --amplo).")
     ct.add_argument("--re", type=Path, default=Path(".re"))
     ct.add_argument("--llm", default="auto")
-    ct.add_argument("-n", type=int, default=60, help="quantos pares avaliar (os de maior peso)")
+    ct.add_argument("-n", type=int, default=60, help="quantos pares avaliar (os de maior peso; 0 = todos)")
     ct.add_argument("--lote", type=int, default=8)
 
     ev = sub.add_parser("evaluate", help="Compara estratégias sobre um dataset JSONL anotado.")

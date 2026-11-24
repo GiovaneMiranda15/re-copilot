@@ -70,7 +70,8 @@ apontarem. **Revise as contradições:** cada par do `pares` vira `rel.conflita_
 léxico (polaridade, números, exclusividade) e perde contradições de sentido ("pago na folha" × "pago por PIX em 2 dias").
 Por isso rode também `recop.py pares --amplo` e julgue cada par lendo os dois enunciados (contradição, complementar ou
 independente). Com motor e LLM, `rag-re-engine contradicoes --re .re` faz esse julgamento em lotes; confira cada
-contradição sugerida antes de registrar. Revise como leitor: o gestor sabe o que decidir? O dev sabe por onde começar?
+contradição sugerida antes de registrar. Com `completo: false`, o resultado não cobre tudo: leia `sem_resposta` e
+`cobertura`, e use `-n 0` para julgar todos os pares. "Nenhuma contradição" só vale com `completo: true`. Revise como leitor: o gestor sabe o que decidir? O dev sabe por onde começar?
 
 ## 7. `validacao`
 

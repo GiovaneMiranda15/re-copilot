@@ -92,14 +92,29 @@ def construir(db: Path, o_que: set[str], llm: str = "auto") -> dict:
 
 
 def contradicoes(re_dir: Path, llm: str = "auto", n: int = 60, lote: int = 8) -> dict:
-    """Julga por LLM os `n` pares do mesmo tema mais fortes (`recop.py pares --amplo`)."""
+    """Julga por LLM os `n` pares do mesmo tema mais fortes (`recop.py pares --amplo`); `n` ≤ 0 julga todos.
+
+    `cobertura` diz o que ficou de fora: pares cortados pelo limite, já ligados ou sem palavra em comum.
+    """
     avisos: list[str] = []
     modelo = resolver_llm(llm, avisos)
     if modelo is None:
         raise RuntimeError("`contradicoes` precisa de um LLM: " + ("; ".join(avisos) or "use --llm")
                            + ". Sem LLM, leia `recop.py pares --amplo` e julgue os pares você mesmo.")
     r = recop()
-    pares = r.pares_amplos(r.load(Path(re_dir)), n)
+    dados = r.load(Path(re_dir))
+    candidatos = r.pares_amplos(dados, 0)
+    pares = candidatos[:n] if n > 0 else candidatos
+    ativos = sum(1 for x in dados["requisitos"] if x.get("status") not in {"descartado", "obsoleto"})
     resultado = julgar(pares, modelo, lote)
+    if pares and not resultado["avaliados"]:  # "nenhuma contradição" aqui seria mentira
+        raise RuntimeError(f"nenhum par foi julgado por {modelo.name}: " + "; ".join(dict.fromkeys(resultado["avisos"]))[:400])
+    possiveis = ativos * (ativos - 1) // 2
+    cortados = len(candidatos) - len(pares)
+    resultado["cobertura"] = {"pares_possiveis": possiveis, "ligados_ou_sem_termo_comum": possiveis - len(candidatos),
+                              "candidatos": len(candidatos), "enviados": len(pares), "cortados_pelo_limite": cortados}
+    if cortados:
+        resultado["completo"] = False
+        resultado["avisos"].append(f"{cortados} par(es) candidato(s) não foram julgados (limite n={n}). Use -n 0 para julgar todos.")
     resultado["pares"] = len(pares)
     return resultado

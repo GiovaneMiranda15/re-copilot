@@ -191,10 +191,10 @@ def test_esquema_postgres_usa_pg_dump_schema_only_e_recusa_senha() -> None:
 
     def runner(cmd, env):
         chamadas.append(cmd)
-        return SimpleNamespace(returncode=0, stdout="SET x = 1;\nCREATE TABLE a (id int);\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="SET row_security = off;\nCREATE TABLE a (id int);\n", stderr="")
 
     ddl = recop.esquema_banco("postgresql://leitor@db:5432/erp", runner=runner)
-    assert "--schema-only" in chamadas[0] and "CREATE TABLE a" in ddl and "SET x" not in ddl
+    assert "--schema-only" in chamadas[0] and "CREATE TABLE a" in ddl and "row_security" not in ddl
     with pytest.raises(SystemExit, match="senha"):
         recop.esquema_banco("postgresql://leitor:segredo@db/erp", runner=runner)
     with pytest.raises(SystemExit, match="não suportado"):
@@ -206,6 +206,26 @@ def test_esquema_mysql_no_data() -> None:
     recop.esquema_banco("mysql://leitor@db:3307/loja",
                         runner=lambda cmd, env: chamadas.append(cmd) or SimpleNamespace(returncode=0, stdout="", stderr=""))
     assert "--no-data" in chamadas[0] and chamadas[0][-1] == "loja" and "3307" in chamadas[0]
+    assert "--events" in chamadas[0] and "--no-tablespaces" in chamadas[0]
+    with pytest.raises(SystemExit, match="SHOW VIEW"):
+        recop.esquema_banco("mysql://leitor@db/loja", runner=lambda cmd, env: SimpleNamespace(
+            returncode=2, stdout="", stderr="SHOW VIEW command denied to user 'leitor'"))
+
+
+def test_limpar_dump_preserva_set_dentro_de_funcao() -> None:
+    pg = ("\\restrict AbC123\n-- Dumped by pg_dump version 16.1\nSET statement_timeout = 0;\nSET default_tablespace = '';\n"
+          "CREATE FUNCTION fechar() AS $$\nUPDATE pedido\nSET status = 'bloqueado'\nWHERE id = p;\n"
+          "SET status = 'x';\n$$;\n\\unrestrict AbC123\n")
+    limpo = recop._limpar_dump(pg)
+    assert "SET status = 'bloqueado'" in limpo and "SET status = 'x';" in limpo
+    assert "statement_timeout" not in limpo and "restrict" not in limpo and "Dumped" not in limpo
+    my = ("/*!40101 SET NAMES utf8mb4 */;\nCREATE TABLE `c` (\n  `id` int\n) ENGINE=InnoDB AUTO_INCREMENT=8123 DEFAULT CHARSET=utf8mb4;\n"
+          "SET @saved_cs_client     = @@character_set_client;\n/*!50001 CREATE VIEW `v` AS SELECT \n 1 AS `id`,\n 1 AS `n`*/;\n"
+          "/*!50003 CREATE*/ /*!50003 TRIGGER `t` BEFORE INSERT ON `c` FOR EACH ROW BEGIN\nSET NEW.status='aberto';\nEND */;;\n"
+          "/*!50001 VIEW `v` AS select 1 */;\n")
+    limpo = recop._limpar_dump(my)
+    assert "SET NEW.status='aberto';" in limpo and "VIEW `v` AS select 1" in limpo and "TRIGGER `t`" in limpo
+    assert "8123" not in limpo and "1 AS `id`" not in limpo and "SET NAMES" not in limpo and "@saved_cs_client" not in limpo
 
 
 # ------------------------------------------------------------------ publicar
